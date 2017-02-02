@@ -1566,6 +1566,8 @@ static int qpnp_hap_set(struct qpnp_hap *hap, int on)
 	unsigned long timeout_ns = POLL_TIME_AUTO_RES_ERR_NS;
 	u32 back_emf_delay_us = hap->time_required_to_generate_back_emf_us;
 
+	mutex_lock(&hap->set_lock);
+
 	if (hap->play_mode == QPNP_HAP_PWM) {
 		if (on)
 			rc = pwm_enable(hap->pwm_info.pwm_dev);
@@ -1592,8 +1594,10 @@ static int qpnp_hap_set(struct qpnp_hap *hap, int on)
 				qpnp_hap_auto_res_enable(hap, 0);
 
 			rc = qpnp_hap_mod_enable(hap, on);
-			if (rc < 0)
+			if (rc < 0) {
+				mutex_unlock(&hap->set_lock);
 				return rc;
+			}
 
 			rc = qpnp_hap_play(hap, on);
 
@@ -1603,8 +1607,10 @@ static int qpnp_hap_set(struct qpnp_hap *hap, int on)
 				usleep_range(back_emf_delay_us,
 							back_emf_delay_us + 1);
 				rc = qpnp_hap_auto_res_enable(hap, 1);
-				if (rc < 0)
+				if (rc < 0) {
+					mutex_unlock(&hap->set_lock);
 					return rc;
+				}
 			}
 			if (hap->act_type == QPNP_HAP_LRA &&
 						hap->correct_lra_drive_freq) {
@@ -1620,8 +1626,10 @@ static int qpnp_hap_set(struct qpnp_hap *hap, int on)
 			}
 		} else {
 			rc = qpnp_hap_play(hap, on);
-			if (rc < 0)
+			if (rc < 0) {
+				mutex_unlock(&hap->set_lock);
 				return rc;
+			}
 
 			if (hap->act_type == QPNP_HAP_LRA &&
 						hap->correct_lra_drive_freq) {
@@ -1638,6 +1646,7 @@ static int qpnp_hap_set(struct qpnp_hap *hap, int on)
 			}
 		}
 	}
+	mutex_unlock(&hap->set_lock);
 
 	return rc;
 }
