@@ -1,4 +1,4 @@
-/* Copyright (c) 2012-2016, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2012-2017, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -450,6 +450,41 @@ static int camera_v4l2_unsubscribe_event(struct v4l2_fh *fh,
 
 	rc = v4l2_event_unsubscribe(&sp->fh, sub);
 
+	return rc;
+}
+
+static long camera_v4l2_vidioc_private_ioctl(struct file *filep, void *fh,
+	bool valid_prio, unsigned int cmd, void *arg)
+{
+	struct camera_v4l2_private *sp = fh_to_private(fh);
+	struct msm_video_device *pvdev = video_drvdata(filep);
+	struct msm_camera_private_ioctl_arg *k_ioctl = arg;
+	long rc = -EINVAL;
+
+	if (WARN_ON(!k_ioctl || !pvdev))
+		return -EIO;
+
+	if (cmd != VIDIOC_MSM_CAMERA_PRIVATE_IOCTL_CMD)
+		return -EINVAL;
+
+	switch (k_ioctl->id) {
+	case MSM_CAMERA_PRIV_IOCTL_ID_RETURN_BUF: {
+		struct msm_camera_return_buf ptr, *tmp = NULL;
+
+		MSM_CAM_GET_IOCTL_ARG_PTR(&tmp, &k_ioctl->ioctl_ptr,
+			sizeof(tmp));
+		if (copy_from_user(&ptr, tmp,
+			sizeof(struct msm_camera_return_buf))) {
+			return -EFAULT;
+		}
+		rc = msm_vb2_return_buf_by_idx(pvdev->vdev->num, sp->stream_id,
+			ptr.index);
+		}
+		break;
+	default:
+		pr_debug("unimplemented id %d", k_ioctl->id);
+		return -EINVAL;
+	}
 	return rc;
 }
 

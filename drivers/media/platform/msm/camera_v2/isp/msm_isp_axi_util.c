@@ -2091,13 +2091,8 @@ static int msm_isp_update_stream_bandwidth(struct vfe_device *vfe_dev)
 	}
 	total_bandwidth = total_pix_bandwidth + total_rdi_bandwidth;
 	rc = msm_isp_update_bandwidth(ISP_VFE0 + vfe_dev->pdev->id,
-<<<<<<< HEAD
 		(total_bandwidth + vfe_dev->hw_info->min_ab),
 		(total_bandwidth + vfe_dev->hw_info->min_ib));
-=======
-		(total_bandwidth + MSM_ISP_MIN_AB),
-		(total_bandwidth + MSM_ISP_MIN_IB));
->>>>>>> 3b34611... import camera from LETV
 
 	if (rc < 0)
 		pr_err("%s: update failed\n", __func__);
@@ -2742,6 +2737,8 @@ static int msm_isp_stop_axi_stream(struct vfe_device *vfe_dev,
 			if (intf >= VFE_RAW_0 &&
 				intf < VFE_SRC_MAX) {
 				vfe_dev->axi_data.src_info[intf].active = 0;
+				vfe_dev->axi_data.src_info[intf].flag = 0;
+
 			}
 		} else
 			src_mask |= (1 << intf);
@@ -2786,6 +2783,7 @@ static int msm_isp_stop_axi_stream(struct vfe_device *vfe_dev,
 		for (i = VFE_RAW_0; i < VFE_SRC_MAX; i++) {
 			if (src_mask & (1 << i)) {
 				vfe_dev->axi_data.src_info[i].active = 0;
+				vfe_dev->axi_data.src_info[i].flag = 0;
 			}
 		}
 	}
@@ -3403,6 +3401,16 @@ int msm_isp_update_axi_stream(struct vfe_device *vfe_dev, void *arg)
 			pr_err("%s: Invalid update type\n", __func__);
 			return -EINVAL;
 		}
+		stream_info = &axi_data->stream_info[HANDLE_TO_IDX(
+				req_frm->stream_handle)];
+		rc = msm_isp_request_frame(vfe_dev, stream_info,
+			req_frm->user_stream_id,
+			req_frm->frame_id,
+			req_frm->buf_index);
+		if (rc)
+			pr_err("%s failed to request frame!\n",
+				__func__);
+		break;
 	}
 	return rc;
 }
