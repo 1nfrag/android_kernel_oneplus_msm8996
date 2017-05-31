@@ -38,6 +38,12 @@ static struct list_head    ordered_sd_list;
 
 static struct msm_queue_head *msm_session_q;
 
+/* This variable represent daemon status
+ * true = daemon present (default state)
+ * false = daemon is NOT present
+ */
+bool is_daemon_status = true;
+
 /* config node envent queue */
 static struct v4l2_fh  *msm_eventq;
 spinlock_t msm_eventq_lock;
@@ -78,7 +84,6 @@ spinlock_t msm_pid_lock;
 			__q->len--;				\
 			list_del_init(&node->member);		\
 			kzfree(node);				\
-			node = NULL;             \
 			break;					\
 		}						\
 	}							\
@@ -96,7 +101,6 @@ spinlock_t msm_pid_lock;
 			__q->len--;				\
 			list_del_init(&node->member);		\
 			kzfree(node);				\
-			node = NULL;   \
 			break;					\
 		}						\
 	}							\
@@ -116,7 +120,6 @@ spinlock_t msm_pid_lock;
 			if (&node->member) \
 				list_del_init(&node->member);		\
 			kzfree(node);	\
-			node = NULL;    \
 		}	\
 	}	\
 	spin_unlock_irqrestore(&__q->lock, flags);		\
@@ -146,7 +149,7 @@ typedef int (*msm_queue_find_func)(void *d1, void *d2);
 	typeof(node) __ret = NULL; \
 	msm_queue_find_func __f = (func); \
 	spin_lock_irqsave(&__q->lock, flags);			\
-	if (!list_empty(&__q->list) && (__q->len != 0)) { \
+	if (!list_empty(&__q->list)) { \
 		list_for_each_entry(node, &__q->list, member) \
 		if ((__f) && __f(node, data)) { \
 			__ret = node; \
@@ -633,6 +636,12 @@ static long msm_private_ioctl(struct file *file, void *fh,
 	unsigned long spin_flags = 0;
 	struct msm_sd_subdev *msm_sd;
 
+	if (cmd == MSM_CAM_V4L2_IOCTL_DAEMON_DISABLED) {
+		is_daemon_status = false;
+		return 0;
+	}
+
+	memset(&event, 0, sizeof(struct v4l2_event));
 	session_id = event_data->session_id;
 	stream_id = event_data->stream_id;
 
@@ -1029,6 +1038,32 @@ struct msm_stream *msm_get_stream_from_vb2q(struct vb2_queue *q)
 	return NULL;
 }
 EXPORT_SYMBOL(msm_get_stream_from_vb2q);
+
+#ifdef CONFIG_COMPAT
+long msm_copy_camera_private_ioctl_args(unsigned long arg,
+	struct msm_camera_private_ioctl_arg *k_ioctl,
+	void __user **tmp_compat_ioctl_ptr)
+{
+	struct msm_camera_private_ioctl_arg up_ioctl;
+
+	if (WARN_ON(!arg || !k_ioctl || !tmp_compat_ioctl_ptr))
+		return -EIO;
+
+	if (copy_from_user(&up_ioctl,
+		(struct msm_camera_private_ioctl_arg *)arg,
+		sizeof(struct msm_camera_private_ioctl_arg)))
+		return -EFAULT;
+
+	k_ioctl->id = up_ioctl.id;
+	k_ioctl->size = up_ioctl.size;
+	k_ioctl->result = up_ioctl.result;
+	k_ioctl->reserved = up_ioctl.reserved;
+	*tmp_compat_ioctl_ptr = compat_ptr(up_ioctl.ioctl_ptr);
+
+	return 0;
+}
+EXPORT_SYMBOL(msm_copy_camera_private_ioctl_args);
+#endif
 
 static void msm_sd_notify(struct v4l2_subdev *sd,
 	unsigned int notification, void *arg)

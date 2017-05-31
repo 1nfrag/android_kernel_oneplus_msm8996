@@ -441,10 +441,6 @@ int msm_isp_request_stats_stream(struct vfe_device *vfe_dev, void *arg)
 		stream_info->framedrop_pattern = 0x1;
 	stream_info->framedrop_period = framedrop_period - 1;
 
-	if (!stream_info->composite_flag)
-		vfe_dev->hw_info->vfe_ops.stats_ops.
-			cfg_wm_irq_mask(vfe_dev, stream_info);
-
 	if (stream_info->init_stats_frame_drop == 0)
 		vfe_dev->hw_info->vfe_ops.stats_ops.cfg_wm_reg(vfe_dev,
 			stream_info);
@@ -481,10 +477,6 @@ int msm_isp_release_stats_stream(struct vfe_device *vfe_dev, void *arg)
 			stream_release_cmd->stream_handle;
 		rc = msm_isp_cfg_stats_stream(vfe_dev, &stream_cfg_cmd);
 	}
-
-	if (!stream_info->composite_flag)
-		vfe_dev->hw_info->vfe_ops.stats_ops.
-			clear_wm_irq_mask(vfe_dev, stream_info);
 
 	vfe_dev->hw_info->vfe_ops.stats_ops.clear_wm_reg(vfe_dev, stream_info);
 	memset(stream_info, 0, sizeof(struct msm_vfe_stats_stream));
@@ -605,12 +597,6 @@ static int msm_isp_stats_update_cgc_override(struct vfe_device *vfe_dev,
 	int i;
 	uint32_t stats_mask = 0, idx;
 
-	if (stream_cfg_cmd->num_streams > MSM_ISP_STATS_MAX) {
-		pr_err("%s invalid num_streams %d\n", __func__,
-			stream_cfg_cmd->num_streams);
-		return -EINVAL;
-	}
-
 	for (i = 0; i < stream_cfg_cmd->num_streams; i++) {
 		idx = STATS_IDX(stream_cfg_cmd->stream_handle[i]);
 
@@ -681,19 +667,12 @@ static int msm_isp_start_stats_stream(struct vfe_device *vfe_dev,
 	uint32_t num_stats_comp_mask = 0;
 	struct msm_vfe_stats_stream *stream_info;
 	struct msm_vfe_stats_shared_data *stats_data = &vfe_dev->stats_data;
-
-	if (stream_cfg_cmd->num_streams > MSM_ISP_STATS_MAX) {
-		pr_err("%s invalid num_streams %d\n", __func__,
-			stream_cfg_cmd->num_streams);
-		return -EINVAL;
-	}
 	num_stats_comp_mask =
 		vfe_dev->hw_info->stats_hw_info->num_stats_comp_mask;
 	rc = vfe_dev->hw_info->vfe_ops.stats_ops.check_streams(
 		stats_data->stream_info);
 	if (rc < 0)
 		return rc;
-
 	for (i = 0; i < stream_cfg_cmd->num_streams; i++) {
 		idx = STATS_IDX(stream_cfg_cmd->stream_handle[i]);
 
@@ -721,6 +700,9 @@ static int msm_isp_start_stats_stream(struct vfe_device *vfe_dev,
 			pr_err("%s: No buffer for stream%d\n", __func__, idx);
 			return rc;
 		}
+		if (!stream_info->composite_flag)
+			vfe_dev->hw_info->vfe_ops.stats_ops.
+				cfg_wm_irq_mask(vfe_dev, stream_info);
 
 		if (vfe_dev->axi_data.src_info[VFE_PIX_0].active)
 			stream_info->state = STATS_START_PENDING;
@@ -793,6 +775,10 @@ static int msm_isp_stop_stats_stream(struct vfe_device *vfe_dev,
 				num_stats_comp_mask);
 			return -EINVAL;
 		}
+
+		if (!stream_info->composite_flag)
+			vfe_dev->hw_info->vfe_ops.stats_ops.
+				clear_wm_irq_mask(vfe_dev, stream_info);
 
 		if (vfe_dev->axi_data.src_info[VFE_PIX_0].active)
 			stream_info->state = STATS_STOP_PENDING;
