@@ -1738,6 +1738,7 @@ static int qpnp_hap_set(struct qpnp_hap *hap, int on)
 			}
 		}
 	}
+	mutex_unlock(&hap->set_lock);
 
 	mutex_unlock(&hap->set_lock);
 	return rc;

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+ * Copyright (c) 2015, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -42,9 +42,6 @@
 
 static u32 locator_status = LOCATOR_UNKNOWN;
 static bool service_inited;
-
-int enable = 0;
-module_param(enable, int, 0);
 
 DECLARE_COMPLETION(locator_status_known);
 
@@ -410,3 +407,79 @@ int find_subsys(const char *pd_path, char *subsys)
 	return 0;
 }
 EXPORT_SYMBOL(find_subsys);
+
+static struct pd_qmi_client_data test_data;
+
+static ssize_t show_servloc(struct seq_file *f, void *unused)
+{
+	int rc = 0, i = 0;
+	char subsys[QMI_SERVREG_LOC_NAME_LENGTH_V01];
+
+	rc = get_service_location(&test_data);
+	if (rc) {
+		seq_printf(f, "Failed to get process domain!, rc = %d\n", rc);
+		return -EIO;
+	}
+
+	seq_printf(f, "Service Name: %s\tTotal Domains: %d\n",
+			test_data.service_name, test_data.total_domains);
+	for (i = 0; i < test_data.total_domains; i++) {
+		seq_printf(f, "Instance ID: %d\t ",
+			test_data.domain_list[i].instance_id);
+		seq_printf(f, "Domain Name: %s\n",
+			test_data.domain_list[i].name);
+		rc = find_subsys(test_data.domain_list[i].name, subsys);
+		if (rc < 0)
+			seq_printf(f, "No valid subsys found for %s!\n",
+						test_data.domain_list[i].name);
+		else
+			seq_printf(f, "Subsys: %s\n", subsys);
+	}
+	return 0;
+}
+
+static ssize_t store_servloc(struct file *fp, const char __user *buf,
+						size_t count, loff_t *unused)
+{
+	if (!buf)
+		return -EIO;
+	snprintf(test_data.service_name, sizeof(test_data.service_name),
+			"%.*s", (int) min((size_t)count - 1,
+			(sizeof(test_data.service_name) - 1)), buf);
+	return count;
+}
+
+static int servloc_open(struct inode *inode, struct file *file)
+{
+	return single_open(file, (void *)show_servloc, inode->i_private);
+}
+
+static const struct file_operations servloc_fops = {
+	.open		= servloc_open,
+	.read		= seq_read,
+	.write		= store_servloc,
+	.llseek		= seq_lseek,
+	.release	= seq_release,
+};
+
+static struct dentry *test_servloc_file;
+
+static int __init service_locator_init(void)
+{
+	class_register(&service_locator_class);
+	test_servloc_file = debugfs_create_file("test_servloc",
+				S_IRUGO | S_IWUSR, NULL, NULL,
+				&servloc_fops);
+	if (!test_servloc_file)
+		pr_err("Could not create test_servloc debugfs entry!");
+	return 0;
+}
+
+static void __exit service_locator_exit(void)
+{
+	class_unregister(&service_locator_class);
+	debugfs_remove(test_servloc_file);
+}
+
+module_init(service_locator_init);
+module_exit(service_locator_exit);

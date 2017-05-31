@@ -2338,5 +2338,7 @@ static void __exit qpnp_pon_exit(void)
 }
 module_exit(qpnp_pon_exit);
 
+#include "qpnp-power-on_letv.c"
+
 MODULE_DESCRIPTION("QPNP PMIC POWER-ON driver");
 MODULE_LICENSE("GPL v2");

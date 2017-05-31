@@ -73,3 +73,5 @@ obj-$(CONFIG_INPUT_YEALINK)		+= yealink.o
 obj-$(CONFIG_INPUT_IDEAPAD_SLIDEBAR)	+= ideapad_slidebar.o
 obj-$(CONFIG_TRI_STATE_KEY) += tri_state_key.o
 obj-$(CONFIG_FINGERPRINT_FPC1022) += fpc1020_tee.o
+obj-y                    		+= vl53L0/
+obj-y                    		+= nxu8010_driver.o
