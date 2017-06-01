@@ -161,6 +161,9 @@ enum tasha_sido_voltage {
 	SIDO_VOLTAGE_NOMINAL_MV = 1100,
 };
 
+extern bool letv_typec_plug_state;
+extern bool letv_typec_4_pole;
+
 static enum codec_variant codec_ver;
 
 static int dig_core_collapse_enable = 1;
@@ -657,6 +660,12 @@ static struct wcd_mbhc_register
 			  0, 0, 0, 0),
 	WCD_MBHC_REGISTER("WCD_MBHC_MUX_CTL",
 			  WCD9335_MBHC_CTL_2, 0x70, 4, 0),
+
+	/* add for headset mic swap from IN2P to IN3P automaticly*/
+	WCD_MBHC_REGISTER("WCD_MBHC_HS_VREF_INP",
+			  WCD9335_MBHC_CTL_2, 0x70, 4, 0),
+	WCD_MBHC_REGISTER("WCD_MBHC_AMIC2_HOLD_EN",
+			  WCD9335_ANA_AMIC2, 0x20, 5, 0),
 };
 
 static const struct wcd_mbhc_intr intr_ids = {
@@ -833,35 +842,6 @@ static const struct tasha_reg_mask_val tasha_spkr_mode1[] = {
 	{WCD9335_CDC_BOOST0_BOOST_CTL, 0x7C, 0x44},
 	{WCD9335_CDC_BOOST1_BOOST_CTL, 0x7C, 0x44},
 };
-
-enum
-{
-	NO_DEVICE	= 0,
-	HS_WITH_MIC	= 1,
-	HS_WITHOUT_MIC = 2,
-};
-
-struct tasha_priv *priv_headset_type;
-
-static ssize_t wcd9xxx_print_name(struct switch_dev *sdev, char *buf)
-{
-	switch (switch_get_state(sdev))
-	{
-		case NO_DEVICE:
-			return sprintf(buf, "No Device\n");
-		case HS_WITH_MIC:
-            if(priv_headset_type->mbhc.mbhc_cfg->headset_type == 1) {
-		        return sprintf(buf, "American Headset\n");
-            } else {
-                return sprintf(buf, "Headset\n");
-            }
-
-		case HS_WITHOUT_MIC:
-			return sprintf(buf, "Handset\n");
-
-	}
-	return -EINVAL;
-}
 
 /**
  * tasha_set_spkr_gain_offset - offset the speaker path
@@ -1436,8 +1416,6 @@ static int tasha_micbias_control(struct snd_soc_codec *codec,
 	case MICB_PULLUP_DISABLE:
 		if (tasha->pullup_ref[micb_index] > 0)
 			tasha->pullup_ref[micb_index]--;
-		if (tasha->pullup_ref[micb_index] < 0)
-			tasha->pullup_ref[micb_index] = 0;
 		if ((tasha->pullup_ref[micb_index] == 0) &&
 		    (tasha->micb_ref[micb_index] == 0))
 			snd_soc_update_bits(codec, micb_reg, 0xC0, 0x00);
@@ -1458,14 +1436,28 @@ static int tasha_micbias_control(struct snd_soc_codec *codec,
 		if (tasha->micb_ref[micb_index] > 0)
 			tasha->micb_ref[micb_index]--;
 		if ((tasha->micb_ref[micb_index] == 0) &&
-		    (tasha->pullup_ref[micb_index] > 0))
-			snd_soc_update_bits(codec, micb_reg, 0xC0, 0x80);
-		else if ((tasha->micb_ref[micb_index] == 0) &&
+		    (tasha->pullup_ref[micb_index] > 0)) {
+			if (letv_typec_4_pole && letv_typec_plug_state &&
+				(micb_num == MIC_BIAS_2)) {
+				snd_soc_update_bits(codec, micb_reg, 0xC0, 0xC0);
+				pr_info("1: letv_headset still pluged!!\n");
+			} else {
+				pr_info("1: micb disable, micb_num(%d)!!\n", micb_num);
+				snd_soc_update_bits(codec, micb_reg, 0xC0, 0x80);
+			}
+		} else if ((tasha->micb_ref[micb_index] == 0) &&
 			 (tasha->pullup_ref[micb_index] == 0)) {
 			if (pre_off_event)
 				blocking_notifier_call_chain(&tasha->notifier,
 						pre_off_event, &tasha->mbhc);
-			snd_soc_update_bits(codec, micb_reg, 0xC0, 0x00);
+			if (letv_typec_4_pole && letv_typec_plug_state &&
+				(micb_num == MIC_BIAS_2)) {
+				snd_soc_update_bits(codec, micb_reg, 0xC0, 0x40);
+				pr_info("2: letv_headset still pluged!!\n");
+			} else {
+				pr_info("2: micb disable, micb_num(%d)!!\n", micb_num);
+				snd_soc_update_bits(codec, micb_reg, 0xC0, 0x00);
+			}
 			if (post_off_event)
 				blocking_notifier_call_chain(&tasha->notifier,
 						post_off_event, &tasha->mbhc);
@@ -3415,11 +3407,6 @@ static int tasha_set_compander(struct snd_kcontrol *kcontrol,
 		    kcontrol->private_value)->shift;
 	int value = ucontrol->value.integer.value[0];
 
-#ifdef CONFIG_SOUND_CONTROL
-	if (comp == COMPANDER_1 || comp == COMPANDER_2)
-		value = 0;
-#endif
-
 	pr_debug("%s: Compander %d enable current %d, new %d\n",
 		 __func__, comp + 1, tasha->comp_enabled[comp], value);
 	tasha->comp_enabled[comp] = value;
@@ -4846,8 +4833,9 @@ static int tasha_codec_enable_swr(struct snd_soc_dapm_widget *w,
 {
 	struct snd_soc_codec *codec = w->codec;
 	struct tasha_priv *tasha;
-	int i, ch_cnt;
-
+#ifdef WSA881X_PA
+  	int i, ch_cnt;
+#endif
 	tasha = snd_soc_codec_get_drvdata(codec);
 
 	if (!tasha->nr)
@@ -4861,6 +4849,7 @@ static int tasha_codec_enable_swr(struct snd_soc_dapm_widget *w,
 		if ((strnstr(w->name, "INT8_", sizeof("RX INT8_"))) &&
 		    !tasha->rx_8_count)
 			tasha->rx_8_count++;
+#ifdef WSA881X_PA
 		ch_cnt = tasha->rx_7_count + tasha->rx_8_count;
 
 		for (i = 0; i < tasha->nr; i++) {
@@ -4869,6 +4858,7 @@ static int tasha_codec_enable_swr(struct snd_soc_dapm_widget *w,
 			swrm_wcd_notify(tasha->swr_ctrl_data[i].swr_pdev,
 					SWR_SET_NUM_RX_CH, &ch_cnt);
 		}
+#endif
 		break;
 	case SND_SOC_DAPM_POST_PMD:
 		if ((strnstr(w->name, "INT7_", sizeof("RX INT7_"))) &&
@@ -4877,6 +4867,7 @@ static int tasha_codec_enable_swr(struct snd_soc_dapm_widget *w,
 		if ((strnstr(w->name, "INT8_", sizeof("RX INT8_"))) &&
 		    tasha->rx_8_count)
 			tasha->rx_8_count--;
+#ifdef WSA881X_PA
 		ch_cnt = tasha->rx_7_count + tasha->rx_8_count;
 
 		for (i = 0; i < tasha->nr; i++)
@@ -4884,12 +4875,53 @@ static int tasha_codec_enable_swr(struct snd_soc_dapm_widget *w,
 					SWR_SET_NUM_RX_CH, &ch_cnt);
 
 		break;
+#endif
 	}
 	dev_dbg(tasha->dev, "%s: current swr ch cnt: %d\n",
 		__func__, tasha->rx_7_count + tasha->rx_8_count);
 
 	return 0;
 }
+
+static int wcd_swr_low_power_get(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	return 0;
+}
+
+static int wcd_swr_low_power_put(struct snd_kcontrol *kcontrol,
+	struct snd_ctl_elem_value *ucontrol)
+{
+	struct snd_soc_codec *codec = snd_soc_kcontrol_codec(kcontrol);
+	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(codec);
+
+	if (1 == ucontrol->value.integer.value[0]) {
+		pr_info("%s, enable!\n", __func__);
+		wcd9xxx_reg_update_bits(
+			&tasha->wcd9xxx->core_res,
+			WCD9335_TEST_DEBUG_NPL_DLY_TEST_1,
+			0x90, 0x10);
+		msleep(10);
+		wcd9xxx_reg_update_bits(
+			&tasha->wcd9xxx->core_res,
+			WCD9335_TEST_DEBUG_NPL_DLY_TEST_1,
+			0x90, 0x90);
+	} else {
+		pr_info("%s, disable!\n", __func__);
+		wcd9xxx_reg_update_bits(
+			&tasha->wcd9xxx->core_res,
+			WCD9335_TEST_DEBUG_NPL_DLY_TEST_1,
+			0x90, 0x10);
+		msleep(10);
+		wcd9xxx_reg_update_bits(
+			&tasha->wcd9xxx->core_res,
+			WCD9335_TEST_DEBUG_NPL_DLY_TEST_1,
+			0x90, 0x90);
+	}
+
+	return 0;
+}
+
 
 static int tasha_codec_enable_mix_path(struct snd_soc_dapm_widget *w,
 		struct snd_kcontrol *kcontrol, int event)
@@ -8351,6 +8383,9 @@ static const struct snd_kcontrol_new tasha_snd_controls[] = {
 	SOC_ENUM_EXT("GSM mode Enable", tasha_vbat_gsm_mode_enum,
 			tasha_vbat_gsm_mode_func_get,
 			tasha_vbat_gsm_mode_func_put),
+
+	SOC_SINGLE_EXT("WCD9335_SWR_LOW_POWER", SND_SOC_NOPM, 23, 1, 0,
+		       wcd_swr_low_power_get, wcd_swr_low_power_put),
 };
 
 static int tasha_put_dec_enum(struct snd_kcontrol *kcontrol,
@@ -8776,12 +8811,11 @@ static const struct soc_enum tasha_ear_pa_gain_enum =
 static const struct snd_kcontrol_new tasha_analog_gain_controls[] = {
 	SOC_ENUM_EXT("EAR PA Gain", tasha_ear_pa_gain_enum,
 		tasha_ear_pa_gain_get, tasha_ear_pa_gain_put),
-#ifndef CONFIG_SOUND_CONTROL
+
 	SOC_SINGLE_TLV("HPHL Volume", WCD9335_HPH_L_EN, 0, 20, 1,
 		line_gain),
 	SOC_SINGLE_TLV("HPHR Volume", WCD9335_HPH_R_EN, 0, 20, 1,
 		line_gain),
-#endif
 	SOC_SINGLE_TLV("LINEOUT1 Volume", WCD9335_DIFF_LO_LO1_COMPANDER,
 			3, 16, 1, line_gain),
 	SOC_SINGLE_TLV("LINEOUT2 Volume", WCD9335_DIFF_LO_LO2_COMPANDER,
@@ -12960,14 +12994,17 @@ static int tasha_device_down(struct wcd9xxx *wcd9xxx)
 	struct snd_soc_codec *codec;
 	struct tasha_priv *priv;
 	int count;
-	int i = 0;
-
+#ifdef WSA881X_PA
+  	int i = 0;
+#endif
 	codec = (struct snd_soc_codec *)(wcd9xxx->ssr_priv);
 	priv = snd_soc_codec_get_drvdata(codec);
 	wcd_cpe_ssr_event(priv->cpe_core, WCD_CPE_BUS_DOWN_EVENT);
+#ifdef WSA881X_PA
 	for (i = 0; i < priv->nr; i++)
 		swrm_wcd_notify(priv->swr_ctrl_data[i].swr_pdev,
 				SWR_DEVICE_DOWN, NULL);
+#endif
 	snd_soc_card_change_online_state(codec->component.card, 0);
 	for (count = 0; count < NUM_CODEC_DAIS; count++)
 		priv->dai[count].bus_down_in_recovery = true;
@@ -13088,7 +13125,7 @@ static struct regulator *tasha_codec_find_ondemand_regulator(
 }
 
 #ifdef CONFIG_SOUND_CONTROL
-static struct snd_soc_codec *sound_control_codec_ptr;
+struct snd_soc_codec *sound_control_codec_ptr;
 
 static ssize_t headphone_gain_show(struct kobject *kobj,
 		struct kobj_attribute *attr, char *buf)
@@ -13107,10 +13144,10 @@ static ssize_t headphone_gain_store(struct kobject *kobj,
 
 	sscanf(buf, "%d %d", &input_l, &input_r);
 
-	if (input_l < -84 || input_l > 20)
+	if (input_l < -10 || input_l > 20)
 		input_l = 0;
 
-	if (input_r < -84 || input_r > 20)
+	if (input_r < -10 || input_r > 20)
 		input_r = 0;
 
 	snd_soc_write(sound_control_codec_ptr, WCD9335_CDC_RX1_RX_VOL_MIX_CTL, input_l);
@@ -13126,120 +13163,8 @@ static struct kobj_attribute headphone_gain_attribute =
 		headphone_gain_show,
 		headphone_gain_store);
 
-static ssize_t headphone_pa_gain_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	u8 hph_l_gain = snd_soc_read(sound_control_codec_ptr, WCD9335_HPH_L_EN);
-	u8 hph_r_gain = snd_soc_read(sound_control_codec_ptr, WCD9335_HPH_R_EN);
-
-	return snprintf(buf, PAGE_SIZE, "%d %d\n",
-		hph_l_gain & 0x1F, hph_r_gain & 0x1F);
-}
-
-static ssize_t headphone_pa_gain_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	unsigned int input_l, input_r;
-	struct tasha_priv *tasha = snd_soc_codec_get_drvdata(sound_control_codec_ptr);
-
-	sscanf(buf, "%d %d", &input_l, &input_r);
-
-	if (input_l < 1 || input_l > 20)
-		input_l = 1;
-
-	if (input_r < 1 || input_r > 20)
-		input_r = 1;
-
-	snd_soc_update_bits(sound_control_codec_ptr, WCD9335_HPH_L_EN, 0x1f, input_l);
-	snd_soc_update_bits(sound_control_codec_ptr, WCD9335_HPH_R_EN, 0x1f, input_r);
-
-	tasha->hph_l_gain = input_l;
-	tasha->hph_r_gain = input_r;
-
-	return count;
-}
-
-static struct kobj_attribute headphone_pa_gain_attribute =
-	__ATTR(headphone_pa_gain, 0664,
-		headphone_pa_gain_show,
-		headphone_pa_gain_store);
-
-
-static ssize_t mic_gain_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	return snprintf(buf, PAGE_SIZE, "%d\n",
-		snd_soc_read(sound_control_codec_ptr, WCD9335_CDC_RX0_RX_VOL_CTL));
-}
-
-static ssize_t mic_gain_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	int input;
-
-	sscanf(buf, "%d", &input);
-
-	if (input < -10 || input > 20)
-		input = 0;
-
-	snd_soc_write(sound_control_codec_ptr, WCD9335_CDC_RX0_RX_VOL_CTL, input);
-
-	return count;
-}
-
-static struct kobj_attribute mic_gain_attribute =
-	__ATTR(mic_gain, 0664,
-		mic_gain_show,
-		mic_gain_store);
-
-struct snd_soc_codec *tfa98xx_codec_ptr;
-#include "tfa9890/tfa98xx-regs.h"
-#define TO_FIXED(e) e
-static ssize_t speaker_gain_show(struct kobject *kobj,
-		struct kobj_attribute *attr, char *buf)
-{
-	u16 value;
-	s64 vol;
-
-	value = snd_soc_read(tfa98xx_codec_ptr, TFA98XX_AUDIO_CTR);
-	value >>= 8;
-	vol = TO_FIXED(value) / -2;
-
-	return snprintf(buf, PAGE_SIZE, "%d\n", (int)vol);
-}
-
-static ssize_t speaker_gain_store(struct kobject *kobj,
-		struct kobj_attribute *attr, const char *buf, size_t count)
-{
-	int input;
-	u16 value = 0;
-	int volume_value;
-
-	sscanf(buf, "%d", &input);
-	if (input < 0 || input > 127)
-		input = 0;
-
-	value = snd_soc_read(tfa98xx_codec_ptr, TFA98XX_AUDIO_CTR);
-	volume_value = 2 * input;
-	if (volume_value > 255)
-		volume_value = 255;
-	value = (value & 0x00FF) | (u16)(volume_value << 8);
-
-	snd_soc_write(tfa98xx_codec_ptr, TFA98XX_AUDIO_CTR, value);
-
-	return count;
-}
-
-static struct kobj_attribute speaker_gain_attribute =
-	__ATTR(speaker_gain, 0664,
-		speaker_gain_show,
-		speaker_gain_store);
-
 static struct attribute *sound_control_attrs[] = {
 		&headphone_gain_attribute.attr,
-		&mic_gain_attribute.attr,
-		&speaker_gain_attribute.attr,
-		&headphone_pa_gain_attribute.attr,
 		NULL,
 };
 
@@ -13357,14 +13282,6 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 		goto err_hwdep;
 	}
 
-		tasha->mbhc.wcd9xxx_sdev.name= "h2w";
-		tasha->mbhc.wcd9xxx_sdev.print_name = wcd9xxx_print_name;
-		ret = switch_dev_register(&tasha->mbhc.wcd9xxx_sdev);
-		if (ret)
-		{
-			goto err_switch_dev_register;
-		}
-
 	ptr = devm_kzalloc(codec->dev, (sizeof(tasha_rx_chs) +
 			   sizeof(tasha_tx_chs)), GFP_KERNEL);
 	if (!ptr) {
@@ -13456,15 +13373,10 @@ static int tasha_codec_probe(struct snd_soc_codec *codec)
 	mutex_unlock(&codec->mutex);
 	snd_soc_dapm_sync(dapm);
 
-
-   priv_headset_type = tasha;
-
 	return ret;
 
 err_pdata:
 	devm_kfree(codec->dev, ptr);
-	switch_dev_unregister(&tasha->mbhc.wcd9xxx_sdev);
-	err_switch_dev_register:
 err_hwdep:
 	devm_kfree(codec->dev, tasha->fw_data);
 err:

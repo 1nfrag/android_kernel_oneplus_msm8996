@@ -36,6 +36,7 @@
 #define MAX_REGULATOR 5
 
 #define MSM_V4L2_PIX_FMT_META v4l2_fourcc('M', 'E', 'T', 'A') /* META */
+#define MSM_V4L2_PIX_FMT_META10 v4l2_fourcc('M', 'E', '1', '0') /* META10 */
 #define MSM_V4L2_PIX_FMT_SBGGR14 v4l2_fourcc('B', 'G', '1', '4')
 	/* 14  BGBG.. GRGR.. */
 #define MSM_V4L2_PIX_FMT_SGBRG14 v4l2_fourcc('G', 'B', '1', '4')
@@ -375,9 +376,6 @@ struct reg_settings_ois_t {
 	enum msm_camera_i2c_data_type data_type;
 	enum msm_ois_i2c_operation i2c_operation;
 	uint32_t delay;
-#define OIS_REG_DATA_SEQ_MAX 128
-    unsigned char reg_data_seq[OIS_REG_DATA_SEQ_MAX];
-    uint32_t reg_data_seq_size;
 };
 
 struct msm_ois_params_t {

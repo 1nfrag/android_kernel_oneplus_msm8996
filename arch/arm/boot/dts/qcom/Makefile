@@ -1,6 +1,3 @@
-dtb-$(CONFIG_ARCH_MSM8996) += msm8996-v3-pmi8996-mtp_15801.dtb \
-    msm8996pro-pmi8996-mtp_15811.dtb
-
 ifeq ($(CONFIG_PRODUCT_LE_X2),y)
 dtb-$(CONFIG_ARCH_MSM8996) += \
 	msm8996-v2-pmi8994-le_x2-evt.dtb \

@@ -274,7 +274,6 @@ static int mdss_dsi_regulator_init(struct platform_device *pdev,
 	return rc;
 }
 
-extern int vendor_lcd_power_on(struct mdss_panel_data *pdata, int enable);
 static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 {
 	int ret = 0;
@@ -309,8 +308,6 @@ static int mdss_dsi_panel_power_off(struct mdss_panel_data *pdata)
 	if (ret)
 		pr_err("%s: failed to disable vregs for %s\n",
 			__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
-
-	vendor_lcd_power_on(pdata, 0);
 
 end:
 	return ret;
@@ -349,8 +346,6 @@ static int mdss_dsi_panel_power_on(struct mdss_panel_data *pdata)
 			__func__, __mdss_dsi_pm_name(DSI_PANEL_PM));
 		return ret;
 	}
-
-	vendor_lcd_power_on(pdata, 1);
 
 	/*
 	 * If continuous splash screen feature is enabled, then we need to
